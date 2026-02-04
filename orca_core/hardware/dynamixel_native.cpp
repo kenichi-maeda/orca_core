@@ -20,6 +20,8 @@ using namespace dynamixel;
 #define ADDR_PRESENT_CURRENT      126
 #define ADDR_PRESENT_VELOCITY     128
 #define ADDR_PRESENT_POSITION     132
+#define ADDR_PRESENT_POS_VEL_CUR  126
+#define LEN_PRESENT_POS_VEL_CUR   10
 #define ADDR_MOVING_STATUS        123
 #define ADDR_PRESENT_TEMPERATURE  146
 
@@ -186,14 +188,15 @@ void DynamixelNative::set_profile_velocity(const std::vector<int>& ids,
 
 void DynamixelNative::init_bulk_readers()
 {
-    if (!bulk_pos_vel_cur)
+    if (!sync_pos_vel_cur)
     {
-        bulk_pos_vel_cur = std::make_unique<GroupBulkRead>(port, packet);
+        sync_pos_vel_cur = std::make_unique<GroupSyncRead>(port, packet, ADDR_PRESENT_POS_VEL_CUR, LEN_PRESENT_POS_VEL_CUR);
         for (int id : motor_ids)
         {
-            bulk_pos_vel_cur->addParam(id, ADDR_PRESENT_CURRENT, 2);
-            bulk_pos_vel_cur->addParam(id, ADDR_PRESENT_VELOCITY, 4);
-            bulk_pos_vel_cur->addParam(id, ADDR_PRESENT_POSITION, 4);
+            if (!sync_pos_vel_cur->addParam(id))
+            {
+                std::cerr << "[ID " << id << "] sync_pos_vel_cur addParam failed" << std::endl;
+            }
         }
     }
 
@@ -201,14 +204,20 @@ void DynamixelNative::init_bulk_readers()
     {
         bulk_temp = std::make_unique<GroupBulkRead>(port, packet);
         for (int id : motor_ids)
-            bulk_temp->addParam(id, ADDR_PRESENT_TEMPERATURE, 1);
+        {
+            if (!bulk_temp->addParam(id, ADDR_PRESENT_TEMPERATURE, 1))
+                std::cerr << "[ID " << id << "] bulk_temp addParam failed" << std::endl;
+        }
     }
 
     if (!bulk_moving)
     {
         bulk_moving = std::make_unique<GroupBulkRead>(port, packet);
         for (int id : motor_ids)
-            bulk_moving->addParam(id, ADDR_MOVING_STATUS, 1);
+        {
+            if (!bulk_moving->addParam(id, ADDR_MOVING_STATUS, 1))
+                std::cerr << "[ID " << id << "] bulk_moving addParam failed" << std::endl;
+        }
     }
 }
 
@@ -217,7 +226,7 @@ std::tuple<std::vector<float>, std::vector<float>, std::vector<float>>
 DynamixelNative::read_pos_vel_cur()
 {
     init_bulk_readers();
-    int result = bulk_pos_vel_cur->txRxPacket();
+    int result = sync_pos_vel_cur->txRxPacket();
     if (result != COMM_SUCCESS)
         std::cerr << packet->getTxRxResult(result) << std::endl;
 
@@ -229,12 +238,22 @@ DynamixelNative::read_pos_vel_cur()
 
     for (int id : motor_ids)
     {
+        bool ok = sync_pos_vel_cur->isAvailable(id, ADDR_PRESENT_POS_VEL_CUR, LEN_PRESENT_POS_VEL_CUR);
+        if (!ok)
+        {
+            std::cerr << "[ID " << id << "] sync_pos_vel_cur data unavailable" << std::endl;
+            pos.push_back(0.0f);
+            vel.push_back(0.0f);
+            cur.push_back(0.0f);
+            continue;
+        }
+
         pos.push_back(unsigned_to_signed(
-            bulk_pos_vel_cur->getData(id, ADDR_PRESENT_POSITION, 4), 4));
+            sync_pos_vel_cur->getData(id, ADDR_PRESENT_POSITION, 4), 4));
         vel.push_back(unsigned_to_signed(
-            bulk_pos_vel_cur->getData(id, ADDR_PRESENT_VELOCITY, 4), 4));
+            sync_pos_vel_cur->getData(id, ADDR_PRESENT_VELOCITY, 4), 4));
         cur.push_back(unsigned_to_signed(
-            bulk_pos_vel_cur->getData(id, ADDR_PRESENT_CURRENT, 2), 2));
+            sync_pos_vel_cur->getData(id, ADDR_PRESENT_CURRENT, 2), 2));
     }
 
     return {pos, vel, cur};
@@ -251,8 +270,16 @@ std::vector<float> DynamixelNative::read_temperature()
     temps.reserve(motor_ids.size());
 
     for (int id : motor_ids)
+    {
+        if (!bulk_temp->isAvailable(id, ADDR_PRESENT_TEMPERATURE, 1))
+        {
+            std::cerr << "[ID " << id << "] bulk_temp data unavailable" << std::endl;
+            temps.push_back(0.0f);
+            continue;
+        }
         temps.push_back(static_cast<float>(
             bulk_temp->getData(id, ADDR_PRESENT_TEMPERATURE, 1)));
+    }
 
     return temps;
 }
@@ -268,8 +295,16 @@ std::vector<uint8_t> DynamixelNative::read_moving_status()
     status.reserve(motor_ids.size());
 
     for (int id : motor_ids)
+    {
+        if (!bulk_moving->isAvailable(id, ADDR_MOVING_STATUS, 1))
+        {
+            std::cerr << "[ID " << id << "] bulk_moving data unavailable" << std::endl;
+            status.push_back(0);
+            continue;
+        }
         status.push_back(
             bulk_moving->getData(id, ADDR_MOVING_STATUS, 1));
+    }
 
     return status;
 }

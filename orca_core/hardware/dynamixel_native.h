@@ -52,8 +52,7 @@ public:
     std::unique_ptr<dynamixel::GroupSyncWrite>
         > sync_writers;
 
-
-    std::unique_ptr<dynamixel::GroupBulkRead> bulk_pos_vel_cur;
+    std::unique_ptr<dynamixel::GroupSyncRead> sync_pos_vel_cur;
     std::unique_ptr<dynamixel::GroupBulkRead> bulk_temp;
     std::unique_ptr<dynamixel::GroupBulkRead> bulk_moving;
 
