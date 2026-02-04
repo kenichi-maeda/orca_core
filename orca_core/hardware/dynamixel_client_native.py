@@ -17,7 +17,7 @@
 import atexit
 import logging
 import time
-import dynamixel_native
+from . import dynamixel_native
 from typing import Optional, Sequence, Union, Tuple
 import numpy as np
 
