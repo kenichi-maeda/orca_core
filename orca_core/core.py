@@ -18,7 +18,7 @@ from .hardware.motor_client import MotorClient
 from .utils.utils import *
 
 if TYPE_CHECKING:
-    from .hardware.dynamixel_client import DynamixelClient
+    from .hardware.dynamixel_client_native import DynamixelClient
     from .hardware.feetech_client import FeetechClient
 
 class OrcaHand:
@@ -167,6 +167,22 @@ class OrcaHand:
                 self.disable_torque()
                 time.sleep(0.1)
                 self._motor_client.disconnect()
+            if os.getenv("ORCA_BENCH", "0") == "1" and hasattr(self, "_bench_samples") and self._bench_samples:
+                samples = np.array(self._bench_samples, dtype=np.float64)
+                mean_ms = samples.mean() * 1000.0
+                median_ms = np.median(samples) * 1000.0
+                mean_hz = 1000.0 / mean_ms if mean_ms > 0 else 0.0
+                median_hz = 1000.0 / median_ms if median_ms > 0 else 0.0
+                print(f"[bench] total write mean latency: {mean_ms:.3f} ms (~{mean_hz:.2f} Hz)")
+                print(f"[bench] total write median latency: {median_ms:.3f} ms (~{median_hz:.2f} Hz)")
+            if os.getenv("ORCA_BENCH", "0") == "1" and hasattr(self, "_bench_read_samples") and self._bench_read_samples:
+                samples = np.array(self._bench_read_samples, dtype=np.float64)
+                mean_ms = samples.mean() * 1000.0
+                median_ms = np.median(samples) * 1000.0
+                mean_hz = 1000.0 / mean_ms if mean_ms > 0 else 0.0
+                median_hz = 1000.0 / median_ms if median_ms > 0 else 0.0
+                print(f"[bench] total read mean latency: {mean_ms:.3f} ms (~{mean_hz:.2f} Hz)")
+                print(f"[bench] total read median latency: {median_ms:.3f} ms (~{median_hz:.2f} Hz)")
             return True, "Disconnected successfully"
         except Exception as e:
             return False, f"Disconnection failed: {str(e)}"
@@ -272,7 +288,27 @@ class OrcaHand:
             Union[np.ndarray, dict]: Motor positions either as numpy array or dictionary {motor_id: position}.
         """
         with self._motor_lock:
-            motor_pos = self._motor_client.read_pos_vel_cur()[0]
+            if os.getenv("ORCA_BENCH", "0") == "1":
+                t0 = time.perf_counter()
+                motor_pos = self._motor_client.read_pos_vel_cur()[0]
+                dt = time.perf_counter() - t0
+                if not hasattr(self, "_bench_read_last_time"):
+                    self._bench_read_last_time = t0
+                    self._bench_read_count = 0
+                    self._bench_read_total = 0.0
+                    self._bench_read_samples = []
+                self._bench_read_count += 1
+                self._bench_read_total += dt
+                self._bench_read_samples.append(dt)
+                if time.perf_counter() - self._bench_read_last_time >= 1.0:
+                    avg_ms = (self._bench_read_total / max(1, self._bench_read_count)) * 1000.0
+                    hz = 1000.0 / avg_ms if avg_ms > 0 else 0.0
+                    # print(f"[bench] read_pos_vel_cur avg latency: {avg_ms:.3f} ms (~{hz:.2f} Hz)")
+                    self._bench_read_last_time = time.perf_counter()
+                    self._bench_read_count = 0
+                    self._bench_read_total = 0.0
+            else:
+                motor_pos = self._motor_client.read_pos_vel_cur()[0]
             if as_dict:
                 return {motor_id: pos for motor_id, pos in zip(self.motor_ids, motor_pos)}
             return motor_pos
@@ -694,7 +730,27 @@ class OrcaHand:
             else:
                 raise ValueError("desired_pos must be a dict, np.ndarray, or list.")
    
-            self._motor_client.write_desired_pos(motor_ids_to_write, positions_to_write)
+            if os.getenv("ORCA_BENCH", "0") == "1":
+                t0 = time.perf_counter()
+                self._motor_client.write_desired_pos(motor_ids_to_write, positions_to_write)
+                dt = time.perf_counter() - t0
+                if not hasattr(self, "_bench_last_time"):
+                    self._bench_last_time = t0
+                    self._bench_count = 0
+                    self._bench_total = 0.0
+                    self._bench_samples = []
+                self._bench_count += 1
+                self._bench_total += dt
+                self._bench_samples.append(dt)
+                if time.perf_counter() - self._bench_last_time >= 1.0:
+                    avg_ms = (self._bench_total / max(1, self._bench_count)) * 1000.0
+                    hz = 1000.0 / avg_ms if avg_ms > 0 else 0.0
+                    # print(f"[bench] write_desired_pos avg latency: {avg_ms:.3f} ms (~{hz:.2f} Hz)")
+                    self._bench_last_time = time.perf_counter()
+                    self._bench_count = 0
+                    self._bench_total = 0.0
+            else:
+                self._motor_client.write_desired_pos(motor_ids_to_write, positions_to_write)
     
     def _motor_to_joint_pos(self, motor_pos: np.ndarray) -> dict:
         """Convert motor positions into joint positions.
