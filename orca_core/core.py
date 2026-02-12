@@ -113,7 +113,15 @@ class OrcaHand:
             ValueError: If motor_type is not recognized.
         """
         if self.motor_type == 'dynamixel':
-            from .hardware.dynamixel_client import DynamixelClient
+            backend = os.getenv("ORCA_DXL_BACKEND", "native").lower()
+            if backend == "python":
+                from .hardware.dynamixel_client import DynamixelClient
+            elif backend == "native":
+                from .hardware.dynamixel_client_native import DynamixelClient
+            else:
+                raise ValueError(
+                    f"Unknown ORCA_DXL_BACKEND: {backend}. Expected 'python' or 'native'."
+                )
             return DynamixelClient(self.motor_ids, self.port, self.baudrate)
         elif self.motor_type == 'feetech':
             from .hardware.feetech_client import FeetechClient
