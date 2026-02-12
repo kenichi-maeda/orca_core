@@ -20,6 +20,7 @@ import time
 from . import dynamixel_native
 from typing import Optional, Sequence, Union, Tuple
 import numpy as np
+from .motor_client import MotorClient
 
 PROTOCOL_VERSION = 2.0
 
@@ -67,7 +68,7 @@ def dynamixel_cleanup_handler():
             logging.warning("Cleanup disconnect failed: %s", e)
 
 
-class DynamixelClient:
+class DynamixelClient(MotorClient):
     """Client for communicating with Dynamixel motors.
 
     NOTE: This only supports Protocol 2.
